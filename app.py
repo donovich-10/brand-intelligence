@@ -237,7 +237,7 @@ Return ONLY this JSON (start with {{):
         messages = [{"role":"user","content":USER}]
         for _ in range(12):
             resp = client.messages.create(
-                model="claude-opus-4-5",
+                model="claude-sonnet-4-6",
                 max_tokens=4000,
                 system=SYSTEM,
                 tools=[{"type":"web_search_20250305","name":"web_search"}],
