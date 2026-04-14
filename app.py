@@ -1,6 +1,5 @@
-import os, json, re
+import os, json, re, requests as req
 from flask import Flask, request, jsonify
-import anthropic
 
 app = Flask(__name__)
 
@@ -16,7 +15,7 @@ HTML = r"""<!DOCTYPE html>
   *{box-sizing:border-box;margin:0;padding:0;}
   body{font-family:-apple-system,'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;}
   .app{max-width:1100px;margin:0 auto;padding:2rem 1.5rem;}
-  .hdr{margin-bottom:2rem;} .hdr p{font-size:11px;color:var(--muted);letter-spacing:.1em;margin-bottom:4px;} .hdr h1{font-size:24px;font-weight:600;} .hdr .sub{font-size:13px;color:var(--muted);margin-top:2px;}
+  .hdr{margin-bottom:2rem;} .hdr p.lbl{font-size:11px;color:var(--muted);letter-spacing:.1em;margin-bottom:4px;} .hdr h1{font-size:24px;font-weight:600;} .hdr .sub{font-size:13px;color:var(--muted);margin-top:2px;}
   .fc{background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);padding:1.5rem;margin-bottom:1.5rem;}
   .fg{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:12px;margin-bottom:12px;}
   .fl label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;}
@@ -52,7 +51,7 @@ HTML = r"""<!DOCTYPE html>
 <body>
 <div class="app">
   <div class="hdr">
-    <p>BRAND INTELLIGENCE</p>
+    <p class="lbl">BRAND INTELLIGENCE</p>
     <h1>מנוע ניטור מותג</h1>
     <p class="sub">סרוק מה נאמר על המותג שלך — לפי תקופה, לפי ערוץ, לפי סנטימנט</p>
   </div>
@@ -71,7 +70,7 @@ HTML = r"""<!DOCTYPE html>
     <div class="rh"><div class="rt"><h2 id="rb"></h2><p id="rp"></p></div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><span id="sb2" class="badge"></span><button class="bs" onclick="newScan()">סריקה חדשה</button></div></div>
     <div class="kg"><div class="kpi"><div class="kl">אזכורים סה"כ</div><div class="kv" id="km">—</div></div><div class="kpi"><div class="kl">חשיפה כוללת</div><div class="kv" id="kr">—</div></div><div class="kpi"><div class="kl">ציון סנטימנט</div><div class="kv" id="ksc">—</div></div><div class="kpi"><div class="kl">Exposure Index</div><div class="kv" id="ke">—</div></div><div class="kpi"><div class="kl">Share of Voice</div><div class="kv" id="ksv">—</div></div></div>
     <div class="cr"><div class="card"><div class="ct">עוצמת כיסוי לאורך הזמן</div><canvas id="tc" height="140"></canvas></div><div class="card"><div class="ct">התפלגות חשיפה לפי ערוץ</div><canvas id="dc" height="160"></canvas><div class="leg" id="dl"></div></div></div>
-    <div class="ar"><div class="card"><div class="ct">ניתוח סנטימנט</div><div id="sbars"></div><div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);"><div style="font-size:11px;color:var(--muted);margin-bottom:6px;">נושאים מובילים</div><div id="themes"></div></div></div><div class="card"><div class="ct">פירוט לפי ערוץ</div><div id="cl"></div></div><div class="card"><div class="ct">פעולות מומלצות</div><div id="al"></div></div></div>
+    <div class="ar"><div class="card"><div class="ct">ניתוח סנטימנט</div><div id="sbars"></div><div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);"><div style="font-size:11px;color:var(--muted);margin-bottom:6px;">נושאים מובילים</div><div id="themes"></div></div></div><div class="card"><div class="ct">פירוט לפי ערוץ</div><div id="cl"></div></div><div class="card"><div class="ct">פעולות מומלצות</div><div id="al2"></div></div></div>
     <div class="sumbox"><div class="ct" style="margin-bottom:.5rem;">סיכום מנהלים</div><p id="st"></p></div>
     <div id="albox" class="hidden albox"><div class="altit">התראות</div><div id="alist"></div></div>
     <div class="card" style="margin-bottom:12px;"><div class="ct">דוגמאות מובילות</div><div id="exs"></div></div>
@@ -99,7 +98,7 @@ async function startScan(){
     const txt=await r.text();
     clearInterval(lt);hide("ls");
     let result;
-    try{result=JSON.parse(txt);}catch(e){throw new Error("תשובה לא תקינה מהשרת: "+txt.substring(0,100));}
+    try{result=JSON.parse(txt);}catch(e){throw new Error("שגיאת שרת: "+txt.substring(0,200));}
     if(!result.success)throw new Error(result.error||"שגיאה לא ידועה");
     render(result.data);
   }catch(err){clearInterval(lt);hide("ls");show("fs");document.getElementById("es").textContent="שגיאה: "+err.message;show("es");}
@@ -132,7 +131,7 @@ function render(d){
   document.getElementById("themes").innerHTML=(d.top_themes||[]).map(t=>`<span class="tp"><span style="width:5px;height:5px;border-radius:50%;background:#1D9E75;display:inline-block;"></span>${t}</span>`).join("");
   document.getElementById("cl").innerHTML=cks.map(k=>{const c=cats[k];const sc4=c.sentiment==="חיובי"?"#1D9E75":c.sentiment==="שלילי"?"#E24B4A":"#BA7517";return`<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);"><div style="display:flex;align-items:center;gap:7px;"><div style="width:8px;height:8px;border-radius:50%;background:${CL[k]||'#888'};"></div><span style="font-size:13px;">${CN[k]||k}</span></div><div><span style="font-size:13px;font-weight:500;">${fN(c.count)}</span><span style="font-size:11px;color:var(--muted);margin-right:6px;"> · ${fN(c.estimated_reach)}</span><span style="font-size:11px;color:${sc4};">${c.sentiment||""}</span></div></div>`;}).join("");
   const ac=["#1D9E75","#378ADD","#534AB7"];
-  document.getElementById("al").innerHTML=(d.recommended_actions||[]).map((a,i)=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:12px;"><div style="min-width:22px;height:22px;border-radius:50%;background:${ac[i]||'#888'};color:#fff;font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center;">${i+1}</div><span style="font-size:13px;line-height:1.5;">${a}</span></div>`).join("");
+  document.getElementById("al2").innerHTML=(d.recommended_actions||[]).map((a,i)=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:12px;"><div style="min-width:22px;height:22px;border-radius:50%;background:${ac[i]||'#888'};color:#fff;font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center;">${i+1}</div><span style="font-size:13px;line-height:1.5;">${a}</span></div>`).join("");
   document.getElementById("st").textContent=d.summary_he||"";
   const alerts=(d.alerts||[]).filter(a=>a);
   if(alerts.length){document.getElementById("alist").innerHTML=alerts.map(a=>`<div style="font-size:13px;color:#412402;">${a}</div>`).join("");show("albox");}else hide("albox");
@@ -147,7 +146,7 @@ function render(d){
 
 @app.errorhandler(Exception)
 def handle_error(e):
-    return jsonify({"success": False, "error": str(e)}), 500
+    return jsonify({"success": False, "error": str(e)}), 200
 
 @app.route("/")
 def index():
@@ -167,29 +166,18 @@ def scan():
 
         key = os.environ.get("ANTHROPIC_API_KEY", "")
         if not key:
-            return jsonify({"success": False, "error": "ANTHROPIC_API_KEY חסר — בדקו את הגדרות Render"})
+            return jsonify({"success": False, "error": "ANTHROPIC_API_KEY חסר"})
 
-        period   = f"{start} עד {end}" if start and end else "30 הימים האחרונים"
-        comp_ln  = f"\nגם השווה למתחרים: {comps}." if comps else ""
+        period  = f"{start} עד {end}" if start and end else "30 הימים האחרונים"
+        comp_ln = f"\nגם השווה למתחרים: {comps}." if comps else ""
 
-        SYSTEM = """אתה אנליסט בינה מותגית. ענה אך ורק ב-JSON תקין.
-אל תוסיף markdown, הסברים, או גרשיים טרייפלים.
-התחל ישירות עם { וסיים עם }."""
+        prompt = f"""נתח את נוכחות המותג "{brand}" בתקופה: {period}.{comp_ln}
 
-        USER = f"""נתח את נוכחות המותג "{brand}" בתקופה: {period}.{comp_ln}
-
-בהתבסס על הידע שלך, הערך את הנוכחות בערוצים הבאים:
-1. כתבות ופרסום עיתונאי
-2. רשתות חברתיות (LinkedIn, Facebook, Instagram, TikTok)
-3. מודעות ופרסומות (Google Ads, Meta Ads)
-4. אירועים (כנסים, וובינרים, השקות)
-5. פורומים וקהילות (Reddit, קהילות מקצועיות)
-
-החזר אך ורק את ה-JSON הבא (התחל ישירות עם {{):
+החזר אך ורק JSON תקין (התחל ישירות עם {{, ללא markdown):
 {{
   "brand": "{brand}",
   "period": "{period}",
-  "summary_he": "3-4 משפטים בעברית המתארים את נוכחות המותג",
+  "summary_he": "3-4 משפטים בעברית על נוכחות המותג",
   "overall_sentiment": "חיובי",
   "sentiment_score": 65,
   "sentiment_breakdown": {{"positive": 68, "neutral": 24, "negative": 8}},
@@ -197,11 +185,11 @@ def scan():
   "exposure_index": 72,
   "share_of_voice": 34,
   "categories": {{
-    "articles": {{"count": 25, "sentiment": "חיובי", "estimated_reach": 500000, "examples": [{{"title": "כותרת כתבה", "source": "שם מקור", "url": "", "date": "2026-01"}}]}},
-    "social": {{"count": 300, "sentiment": "ניטרלי", "estimated_reach": 200000, "platforms": ["LinkedIn", "Facebook"], "examples": [{{"text": "תוכן אזכור", "platform": "LinkedIn"}}]}},
-    "ads": {{"count": 10, "sentiment": "חיובי", "estimated_reach": 300000, "platforms": ["Google", "Meta"], "notes": "תיאור הפרסומות"}},
-    "events": {{"count": 3, "sentiment": "חיובי", "estimated_reach": 5000, "examples": [{{"name": "שם אירוע", "date": "2026-01", "description": "תיאור"}}]}},
-    "forums": {{"count": 50, "sentiment": "ניטרלי", "estimated_reach": 30000, "platforms": ["Reddit"], "examples": [{{"text": "תוכן דיון", "platform": "Reddit"}}]}}
+    "articles": {{"count": 25, "sentiment": "חיובי", "estimated_reach": 500000, "examples": [{{"title": "כותרת", "source": "מקור", "url": "", "date": "2026-01"}}]}},
+    "social": {{"count": 300, "sentiment": "ניטרלי", "estimated_reach": 200000, "platforms": ["LinkedIn"], "examples": [{{"text": "תוכן", "platform": "LinkedIn"}}]}},
+    "ads": {{"count": 10, "sentiment": "חיובי", "estimated_reach": 300000, "platforms": ["Google"], "notes": "תיאור"}},
+    "events": {{"count": 3, "sentiment": "חיובי", "estimated_reach": 5000, "examples": [{{"name": "אירוע", "date": "2026-01", "description": "תיאור"}}]}},
+    "forums": {{"count": 50, "sentiment": "ניטרלי", "estimated_reach": 30000, "platforms": ["Reddit"], "examples": [{{"text": "תוכן", "platform": "Reddit"}}]}}
   }},
   "monthly_volume": [
     {{"month": "Jan", "articles": 5, "social": 50, "forums": 10}},
@@ -209,34 +197,42 @@ def scan():
     {{"month": "Mar", "articles": 6, "social": 60, "forums": 12}},
     {{"month": "Apr", "articles": 12, "social": 120, "forums": 20}}
   ],
-  "top_themes": ["נושא מוביל 1", "נושא מוביל 2", "נושא מוביל 3"],
+  "top_themes": ["נושא 1", "נושא 2", "נושא 3"],
   "alerts": [],
-  "recommended_actions": ["פעולה מומלצת 1", "פעולה מומלצת 2", "פעולה מומלצת 3"]
+  "recommended_actions": ["פעולה 1", "פעולה 2", "פעולה 3"]
 }}"""
 
-        client = anthropic.Anthropic(api_key=key)
-        resp   = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=3000,
-            messages=[{"role": "user", "content": USER}],
-            system=SYSTEM,
+        response = req.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 3000,
+                "system": "אתה אנליסט בינה מותגית. ענה אך ורק ב-JSON תקין ללא markdown. התחל עם { וסיים עם }.",
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=120,
         )
 
-        text = resp.content[0].text.strip()
-        # Clean any accidental markdown
+        if response.status_code != 200:
+            return jsonify({"success": False, "error": f"API error {response.status_code}: {response.text[:200]}"})
+
+        text = response.json()["content"][0]["text"].strip()
         if text.startswith("```"):
             text = re.sub(r"^```[a-z]*\n?", "", text)
             text = re.sub(r"\n?```$", "", text)
 
         m = re.search(r"\{[\s\S]*\}", text)
         if not m:
-            return jsonify({"success": False, "error": "לא נמצא JSON בתשובה. תשובה: " + text[:200]})
+            return jsonify({"success": False, "error": "לא נמצא JSON. תשובה: " + text[:300]})
 
         data = json.loads(m.group())
         return jsonify({"success": True, "data": data})
 
-    except json.JSONDecodeError as e:
-        return jsonify({"success": False, "error": "שגיאת JSON: " + str(e)})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
