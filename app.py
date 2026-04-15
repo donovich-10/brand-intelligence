@@ -12,7 +12,9 @@ PAGE = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Kornit Digital — Brand Intelligence</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
@@ -40,6 +42,8 @@ body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#fff;color
 .lbl{display:block;font-size:11px;color:#767672;margin-bottom:3px;font-weight:500;letter-spacing:.04em;}
 input[type=text]{width:100%;padding:9px 12px;border:1.5px solid #E5E5E2;border-radius:6px;font-size:13px;color:#1C1C1C;outline:none;background:#F7F7F5;}
 input[type=text]:focus{border-color:#1C1C1C;background:#fff;}
+.date-inp{cursor:pointer;}
+.date-inp:hover{border-color:#1C1C1C;}
 .tags{margin:6px 0;}
 .tag{display:inline-flex;align-items:center;gap:4px;background:#1C1C1C;color:#fff;border-radius:4px;padding:3px 8px;font-size:11px;margin:0 4px 4px 0;cursor:default;}
 .tag-x{cursor:pointer;color:#999;padding:0 2px;font-size:13px;}
@@ -225,12 +229,12 @@ input[type=text]:focus{border-color:#1C1C1C;background:#fff;}
       <input type="text" id="inp-brand" placeholder="e.g. Kornit Digital" value="Kornit Digital">
     </div>
     <div>
-      <label class="lbl">From (DD/MM/YYYY)</label>
-      <input type="text" id="inp-from" placeholder="01/01/2026">
+      <label class="lbl">From</label>
+      <input type="text" id="inp-from" placeholder="DD/MM/YYYY" class="date-inp" readonly>
     </div>
     <div>
-      <label class="lbl">To (DD/MM/YYYY)</label>
-      <input type="text" id="inp-to" placeholder="14/04/2026">
+      <label class="lbl">To</label>
+      <input type="text" id="inp-to" placeholder="DD/MM/YYYY" class="date-inp" readonly>
     </div>
   </div>
   <div>
@@ -436,8 +440,8 @@ function setDefaultDates() {
   from.setDate(to.getDate()-30);
   var fEl = document.getElementById("inp-from");
   var tEl = document.getElementById("inp-to");
-  if (fEl && !fEl.value) fEl.value = fmtDate(from);
-  if (tEl && !tEl.value) tEl.value = fmtDate(to);
+  if (fEl && !fEl.value) fEl._flatpickr ? fEl._flatpickr.setDate(from) : (fEl.value = fmtDate(from));
+  if (tEl && !tEl.value) tEl._flatpickr ? tEl._flatpickr.setDate(to) : (tEl.value = fmtDate(to));
 }
 
 // ── Scan ───────────────────────────────────────────────
@@ -1069,6 +1073,14 @@ function exportPDF() {
 document.addEventListener("DOMContentLoaded", function() {
   // Competitors
   renderTags();
+  // Date pickers with flatpickr
+  var fpConfig = {
+    dateFormat: "d/m/Y",
+    allowInput: true,
+    locale: {firstDayOfWeek: 0}
+  };
+  flatpickr("#inp-from", fpConfig);
+  flatpickr("#inp-to", Object.assign({}, fpConfig));
   // Default dates
   setDefaultDates();
   // Button events
@@ -1222,18 +1234,18 @@ Return ONLY this JSON (start with {{):
         messages = [{"role": "user", "content": prompt}]
 
         # Loop with web_search tool
-        for _ in range(15):
+        for _ in range(12):
             resp = req.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
                 json={
-                    "model": "claude-sonnet-4-6",
-                    "max_tokens": 5000,
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 4000,
                     "system": SYSTEM,
                     "tools": [{"type": "web_search_20250305", "name": "web_search"}],
                     "messages": messages,
                 },
-                timeout=180,
+                timeout=120,
             )
 
             if resp.status_code != 200:
