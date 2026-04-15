@@ -13,6 +13,8 @@ PAGE = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Kornit Digital — Brand Intelligence</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#fff;color:#1C1C1C;min-height:100vh;}
@@ -561,13 +563,17 @@ function renderResults(d, fromStr, toStr) {
   // Negative mentions
   var negs = d.negative_mentions || [];
   var negTotal = d.sentiment_breakdown ? Math.round((d.sentiment_breakdown.negative/100)*(d.total_mentions_estimate||0)) : 0;
+  var negPct = d.sentiment_breakdown ? (d.sentiment_breakdown.negative||0) : 0;
+  var yoyNegPct = yoy && yoy.sentiment_breakdown ? (yoy.sentiment_breakdown.negative||0) : null;
+  var yoyNegTotal = yoyNegPct && yoy ? Math.round((yoyNegPct/100)*(yoy.total_mentions_estimate||0)) : null;
   if (negs.length || negTotal > 0) {
     show("neg-section");
+    var negDelta = (yoyNegPct!==null) ? '<span style="font-size:10px;color:'+(negPct<=yoyNegPct?"#1D9E75":"#E24B4A")+';font-weight:600;">'+(negPct<=yoyNegPct?"▼ ":"▲ ")+Math.abs(negPct-yoyNegPct).toFixed(1)+'% vs last year</span>' : "";
     document.getElementById("neg-kpis").innerHTML =
-      '<div class="neg-kpi"><div class="kpi-label">Negative mentions</div><div class="kpi-val">'+fN(negTotal)+'</div></div>'
-      +'<div class="neg-kpi"><div class="kpi-label">% of total</div><div class="kpi-val">'+(d.sentiment_breakdown?d.sentiment_breakdown.negative:0)+'%</div></div>'
+      '<div class="neg-kpi"><div class="kpi-label">Negative mentions</div><div class="kpi-val">'+fN(negTotal)+'</div>'+(yoyNegTotal!==null?'<div style="font-size:10px;color:#767672;">Last year: '+fN(yoyNegTotal)+'</div>':'')+'</div>'
+      +'<div class="neg-kpi"><div class="kpi-label">% of total</div><div class="kpi-val">'+negPct+'%</div>'+(yoyNegPct!==null?'<div style="font-size:10px;color:#767672;">Last year: '+yoyNegPct+'%</div>':'')+'<div>'+negDelta+'</div></div>'
       +'<div class="neg-kpi"><div class="kpi-label">Main theme</div><div class="kpi-val" style="font-size:13px;">'+(d.main_negative_theme||"—")+'</div></div>'
-      +'<div class="neg-kpi"><div class="kpi-label">Competitors avg</div><div class="kpi-val" style="font-size:14px;">'+(d.competitor_negative_avg||"—")+'%</div></div>';
+      +'<div class="neg-kpi"><div class="kpi-label">vs competitors avg</div><div class="kpi-val" style="font-size:14px;">'+(d.competitor_negative_avg||"—")+'%</div></div>';
     var negHtml = "";
     negs.forEach(function(n) {
       var q = gsearch(brand, n.text||n.title||"negative mention");
@@ -620,7 +626,17 @@ function renderResults(d, fromStr, toStr) {
       {label:"YouTube",data:mv.map(function(m){return m.youtube||0;}),backgroundColor:"#E24B4A",borderRadius:3},
       {label:"Forums",data:mv.map(function(m){return m.forums||0;}),backgroundColor:"#888780",borderRadius:3}
     ]},
-    options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},stacked:true},y:{grid:{color:"rgba(0,0,0,0.04)"},beginAtZero:true,stacked:true}},animation:{duration:700}}
+    options:{responsive:true,
+      plugins:{
+        legend:{display:true,position:"bottom",labels:{font:{size:10},boxWidth:10}},
+        tooltip:{callbacks:{footer:function(items){var tot=items.reduce(function(s,i){return s+(i.raw||0);},0);return "Total: "+fN(tot);}}}
+      },
+      scales:{
+        x:{grid:{display:false},stacked:true,ticks:{font:{size:10}}},
+        y:{grid:{color:"rgba(0,0,0,0.04)"},beginAtZero:true,stacked:true,ticks:{callback:function(v){return fN(v);}}}
+      },
+      animation:{duration:700}
+    }
   });
 
   // Donut
@@ -631,8 +647,30 @@ function renderResults(d, fromStr, toStr) {
   dChart = new Chart(document.getElementById("donut-chart"), {
     type:"doughnut",
     data:{labels:cks.map(function(k){return CH_NAME[k]||k;}),datasets:[{data:cd,backgroundColor:cc,borderWidth:0,hoverOffset:4}]},
-    options:{responsive:true,cutout:"70%",plugins:{legend:{display:false}},animation:{duration:700}}
+    options:{responsive:true,cutout:"65%",
+      plugins:{
+        legend:{display:false},
+        tooltip:{callbacks:{label:function(ctx){return " "+ctx.label+": "+fN(ctx.raw)+" ("+Math.round((ctx.raw/tl)*100)+"%)";}}},
+      },
+      animation:{duration:700}
+    }
   });
+  // Add total in centre
+  var donutEl = document.getElementById("donut-chart");
+  if (!donutEl._centrePlugin) {
+    donutEl._centrePlugin = true;
+    Chart.register({id:"donutCentre",beforeDraw:function(chart){
+      if(chart.canvas.id!=="donut-chart")return;
+      var ctx2=chart.ctx; var ca=chart.chartArea;
+      var cx=(ca.left+ca.right)/2, cy=(ca.top+ca.bottom)/2;
+      ctx2.save(); ctx2.textAlign="center"; ctx2.textBaseline="middle";
+      ctx2.fillStyle="#1C1C1C"; ctx2.font="bold 14px -apple-system,Arial,sans-serif";
+      ctx2.fillText(fN(tl), cx, cy-6);
+      ctx2.fillStyle="#767672"; ctx2.font="10px -apple-system,Arial,sans-serif";
+      ctx2.fillText("reach", cx, cy+8);
+      ctx2.restore();
+    }});
+  }
   var tl = cd.reduce(function(a,b){return a+b;},0)||1;
   document.getElementById("donut-legend").innerHTML = cks.map(function(k,i){
     return '<div class="leg-item"><div style="display:flex;align-items:center;"><div class="leg-dot" style="background:'+cc[i]+';"></div><span style="font-size:12px;">'+( CH_NAME[k]||k)+'</span></div><span style="font-size:12px;font-weight:600;">'+Math.round((cd[i]/tl)*100)+'%</span></div>';
@@ -656,9 +694,13 @@ function renderResults(d, fromStr, toStr) {
 
   // Actions
   var acColors = ["#1C1C1C","#378ADD","#534AB7","#1D9E75"];
-  document.getElementById("actions").innerHTML = (d.recommended_actions||[]).map(function(a,i){
-    return '<div class="act-item"><div class="act-num" style="background:'+(acColors[i]||"#888")+';">'+(i+1)+'</div><div class="act-text">'+a+'</div></div>';
-  }).join("");
+  document.getElementById("actions").innerHTML =
+    '<div style="font-size:11px;color:#767672;background:#F7F7F5;padding:8px 10px;border-radius:4px;margin-bottom:10px;line-height:1.5;">'
+    +'<strong>How recommendations are generated:</strong> Based on sentiment trends, channel performance gaps, competitor share of voice, and volume changes detected in the scanned period.'
+    +'</div>'
+    +(d.recommended_actions||[]).map(function(a,i){
+      return '<div class="act-item"><div class="act-num" style="background:'+(acColors[i]||"#888")+';">'+(i+1)+'</div><div class="act-text">'+a+'</div></div>';
+    }).join("");
 
   // Summary
   document.getElementById("summary-text").textContent = d.summary || d.summary_he || "";
@@ -686,7 +728,7 @@ function renderResults(d, fromStr, toStr) {
     exs.forEach(function(ex) {
       var lbl = ex.title||ex.text||ex.name||"Source";
       var sub = ex.source||ex.platform||ex.date||"";
-      var url = gsearch(brand, lbl);
+      var url = (ex.url && ex.url.startsWith("http")) ? ex.url : ("https://news.google.com/search?q="+encodeURIComponent('"'+brand+'" '+lbl));
       srcHtml += '<div class="src-item"><div class="src-icon" style="background:'+col+'20;color:'+col+';">'+(CH_ICON[k]||"?")+'</div><div class="src-body"><a href="'+url+'" target="_blank" class="src-link">'+lbl+'</a>'+(sub?'<div class="src-meta">'+sub+'</div>':'')+'</div></div>';
     });
     srcHtml += '</div>';
@@ -723,28 +765,100 @@ function exportWord() {
   var period = document.getElementById("res-period").textContent||"";
   var summary = d.summary||d.summary_he||"";
   var cats = d.categories||{};
-  var catRows = Object.keys(cats).map(function(k){var c=cats[k];return "<tr><td>"+(CH_NAME[k]||k)+"</td><td>"+fN(c.count)+"</td><td>"+fN(c.estimated_reach)+"</td><td>"+sentLbl(c.sentiment)+"</td></tr>";}).join("");
   var brandLc = (d.brand||"").toLowerCase();
-  var compRows = (d.competitor_comparison||[]).filter(function(c){return c.name&&c.name.toLowerCase()!==brandLc;}).map(function(c){return "<tr><td>"+c.name+"</td><td>"+c.sov+"%</td><td>"+sentLbl(c.sentiment)+"</td></tr>";}).join("");
+  var yoy = d.yoy||null;
+  var sb = d.sentiment_breakdown||{positive:0,neutral:0,negative:0};
+
+  // Build full channel table
+  var catRows = Object.keys(cats).map(function(k){
+    var c=cats[k];
+    return "<tr><td>"+(CH_NAME[k]||k)+"</td><td>"+fN(c.count)+"</td><td>"+fN(c.estimated_reach)+"</td><td>"+sentLbl(c.sentiment)+"</td><td style='font-size:10pt;color:#555'>"+( c.sentiment_reason||"")+"</td></tr>";
+  }).join("");
+
+  // Competitor table
+  var compList = [{name:d.brand,sov:d.share_of_voice||0,sentiment:d.overall_sentiment}];
+  (d.competitor_comparison||[]).forEach(function(c){if(c.name&&c.name.toLowerCase()!==brandLc)compList.push(c);});
+  var compRows = compList.map(function(c){return "<tr><td>"+c.name+"</td><td>"+c.sov+"%</td><td>"+sentLbl(c.sentiment)+"</td></tr>";}).join("");
+
+  // YoY table
+  var yoySection = "";
+  if (yoy) {
+    yoySection = "<h2>Year-over-year comparison</h2>"
+      +"<table><tr><th>Metric</th><th>This period</th><th>Last year</th><th>Change</th></tr>"
+      +"<tr><td>Total mentions</td><td>"+fN(d.total_mentions_estimate)+"</td><td>"+fN(yoy.total_mentions_estimate)+"</td><td>"+(yoy.total_mentions_estimate?Math.round(((d.total_mentions_estimate-yoy.total_mentions_estimate)/yoy.total_mentions_estimate)*100):"-")+"%</td></tr>"
+      +"<tr><td>Sentiment score</td><td>"+(d.sentiment_score>0?"+":"")+d.sentiment_score+"</td><td>"+(yoy.sentiment_score>0?"+":"")+yoy.sentiment_score+"</td><td>"+(yoy.sentiment_score?Math.round(d.sentiment_score-yoy.sentiment_score):"—")+" pts</td></tr>"
+      +"<tr><td>Exposure index</td><td>"+(d.exposure_index||"—")+"/100</td><td>"+(yoy.exposure_index||"—")+"/100</td><td>"+(yoy.exposure_index&&d.exposure_index?Math.round(((d.exposure_index-yoy.exposure_index)/yoy.exposure_index)*100):"—")+"%</td></tr>"
+      +"<tr><td>Share of voice</td><td>"+(d.share_of_voice||0)+"%</td><td>"+(yoy.share_of_voice||0)+"%</td><td>"+Math.round((d.share_of_voice||0)-(yoy.share_of_voice||0))+" pts</td></tr>"
+      +"</table>";
+  }
+
+  // Negative mentions
+  var negSection = "";
+  var negs = d.negative_mentions||[];
+  if (negs.length) {
+    negSection = "<h2>Negative mentions</h2>"
+      +"<p>Total negative: ~"+Math.round(((sb.negative||0)/100)*(d.total_mentions_estimate||0))
+      +" ("+( sb.negative||0)+"% of total)";
+    if (yoy) negSection += " &nbsp;|&nbsp; Last year: ~"+Math.round(((yoy.sentiment_breakdown&&yoy.sentiment_breakdown.negative||10)/100)*(yoy.total_mentions_estimate||0));
+    negSection += "</p><ul>"+negs.map(function(n){return "<li>"+( n.text||n.title||"")+" <em>["+( n.source||n.platform||"")+"]</em></li>";}).join("")+"</ul>";
+  }
+
+  // Alerts
+  var alertSection = "";
+  var alerts=(d.alerts||[]).filter(function(a){return a;});
+  if (alerts.length) {
+    alertSection = "<h2>Alerts &amp; signals</h2><ul>"+alerts.map(function(a){
+      var isO=typeof a==="object";
+      return "<li><strong>"+(isO?a.title:"Alert")+":</strong> "+(isO?a.text:a)+"</li>";
+    }).join("")+"</ul>";
+  }
+
+  // Sources
+  var srcSection = "<h2>Sources &amp; references</h2>";
+  Object.keys(cats).forEach(function(k){
+    var exs=cats[k].examples||[];
+    if (!exs.length) return;
+    srcSection += "<h3>"+(CH_NAME[k]||k)+"</h3><ul>";
+    exs.forEach(function(ex){
+      var lbl=ex.title||ex.text||ex.name||"Source";
+      var sub=ex.source||ex.platform||ex.date||"";
+      var url=ex.url&&ex.url.startsWith("http")?ex.url:gsearch(d.brand,lbl);
+      srcSection += "<li><a href='"+url+"'>"+lbl+"</a>"+(sub?" ["+sub+"]":"")+"</li>";
+    });
+    srcSection += "</ul>";
+  });
+
   var actions = (d.recommended_actions||[]).map(function(a,i){return "<li>"+a+"</li>";}).join("");
-  var html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>'+d.brand+'</title>'
-    +'<style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;margin:40px;}h1{font-size:18pt;color:#1C1C1C;border-bottom:2pt solid #1C1C1C;padding-bottom:8px;}h2{font-size:13pt;margin-top:24px;}table{border-collapse:collapse;width:100%;}th{background:#1C1C1C;color:#fff;padding:7px 10px;text-align:left;}td{padding:6px 10px;border-bottom:1px solid #E5E5E2;}</style></head><body>'
+
+  var html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>'+d.brand+' Report</title>'
+    +'<style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;margin:40px;line-height:1.5;}h1{font-size:18pt;color:#1C1C1C;border-bottom:2pt solid #1C1C1C;padding-bottom:8px;}h2{font-size:13pt;color:#1C1C1C;margin-top:24px;margin-bottom:8px;}h3{font-size:11pt;color:#1C1C1C;margin-top:12px;}table{border-collapse:collapse;width:100%;margin:10px 0;}th{background:#1C1C1C;color:#fff;padding:6px 10px;text-align:left;font-size:10pt;}td{padding:5px 10px;border-bottom:1px solid #E5E5E2;font-size:10pt;}.box{background:#F7F7F5;padding:14px;margin:10px 0;border-left:4px solid #1C1C1C;}.krow{display:flex;gap:20px;margin:10px 0;}.kbox{border:1px solid #E5E5E2;padding:10px 16px;text-align:center;min-width:80px;}.klbl{font-size:9pt;color:#767672;text-transform:uppercase;}.kval{font-size:16pt;font-weight:bold;}ul{margin:8px 0;padding-right:0;}li{margin:5px 0;}</style></head><body>'
     +'<h1>'+d.brand+' — Brand Intelligence Report</h1>'
     +'<p style="color:#767672;font-size:10pt;">Period: '+period+' &nbsp;|&nbsp; Generated: '+todayStr()+'</p>'
     +'<h2>Key metrics</h2>'
-    +'<table><tr><th>Metric</th><th>Value</th></tr><tr><td>Total mentions</td><td>'+fN(d.total_mentions_estimate)+'</td></tr><tr><td>Sentiment score</td><td>'+(d.sentiment_score>0?"+":"")+d.sentiment_score+'</td></tr><tr><td>Exposure index</td><td>'+(d.exposure_index||"—")+'/100</td></tr><tr><td>Share of voice</td><td>'+(d.share_of_voice||0)+'%</td></tr></table>'
-    +'<h2>Executive summary</h2><p>'+summary+'</p>'
-    +'<h2>Channel breakdown</h2><table><tr><th>Channel</th><th>Mentions</th><th>Reach</th><th>Sentiment</th></tr>'+catRows+'</table>'
-    +'<h2>Competitor comparison</h2><table><tr><th>Brand</th><th>Share of Voice</th><th>Sentiment</th></tr><tr><td><strong>'+d.brand+'</strong></td><td><strong>'+(d.share_of_voice||0)+'%</strong></td><td>'+sentLbl(d.overall_sentiment)+'</td></tr>'+compRows+'</table>'
+    +'<table><tr><th>Metric</th><th>Value</th><th>Last year</th></tr>'
+    +'<tr><td>Total mentions</td><td><strong>'+fN(d.total_mentions_estimate)+'</strong></td><td>'+(yoy?fN(yoy.total_mentions_estimate):"—")+'</td></tr>'
+    +'<tr><td>Sentiment score</td><td><strong>'+(d.sentiment_score>0?"+":"")+d.sentiment_score+'</strong></td><td>'+(yoy?(yoy.sentiment_score>0?"+":"")+yoy.sentiment_score:"—")+'</td></tr>'
+    +'<tr><td>Positive / Neutral / Negative</td><td><strong>'+(sb.positive||0)+'% / '+(sb.neutral||0)+'% / '+(sb.negative||0)+'%</strong></td><td>—</td></tr>'
+    +'<tr><td>Exposure index</td><td><strong>'+(d.exposure_index||"—")+'/100</strong></td><td>'+(yoy?(yoy.exposure_index||"—")+"/100":"—")+'</td></tr>'
+    +'<tr><td>Share of voice</td><td><strong>'+(d.share_of_voice||0)+'%</strong></td><td>'+(yoy?(yoy.share_of_voice||0)+"%":"—")+'</td></tr>'
+    +'</table>'
+    +yoySection
+    +'<h2>Executive summary</h2><div class="box"><p>'+summary+'</p></div>'
+    +'<h2>Channel breakdown</h2><table><tr><th>Channel</th><th>Mentions</th><th>Reach</th><th>Sentiment</th><th>Why</th></tr>'+catRows+'</table>'
+    +'<h2>Competitor comparison — share of voice</h2><table><tr><th>Brand</th><th>Share of Voice</th><th>Sentiment</th></tr>'+compRows+'</table>'
+    +'<h2>Top themes</h2><p>'+(d.top_themes||[]).join(" &nbsp;&middot;&nbsp; ")+'</p>'
     +'<h2>Recommended actions</h2><ol>'+actions+'</ol>'
-    +'<p style="color:#767672;font-size:10pt;margin-top:30px;">Kornit Digital Brand Intelligence · '+period+'</p>'
+    +negSection+alertSection+srcSection
+    +'<p style="color:#767672;font-size:9pt;margin-top:32px;border-top:1px solid #E5E5E2;padding-top:8px;">Kornit Digital Brand Intelligence &nbsp;|&nbsp; '+period+'</p>'
     +'</body></html>';
+
   var blob = new Blob([html], {type:"application/msword"});
   var a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = (d.brand||"brand").replace(/\s+/g,"-")+"-report.doc";
+  a.download = (d.brand||"brand").replace(/\s+/g,"-")+"-brand-report.doc";
   a.click(); URL.revokeObjectURL(a.href);
 }
+
 
 function exportPDF() {
   if (!scanResult) return;
@@ -753,25 +867,203 @@ function exportPDF() {
   var summary = d.summary||d.summary_he||"";
   var cats = d.categories||{};
   var brandLc = (d.brand||"").toLowerCase();
-  var catRows = Object.keys(cats).map(function(k){var c=cats[k];return '<tr><td>'+(CH_NAME[k]||k)+'</td><td>'+fN(c.count)+'</td><td>'+fN(c.estimated_reach)+'</td><td style="color:'+sentCol(c.sentiment)+'">'+sentLbl(c.sentiment)+'</td></tr>';}).join("");
-  var compRows = [{name:d.brand,sov:d.share_of_voice||0,sentiment:d.overall_sentiment}].concat((d.competitor_comparison||[]).filter(function(c){return c.name&&c.name.toLowerCase()!==brandLc;})).map(function(c){return '<tr><td>'+c.name+'</td><td>'+c.sov+'%</td><td style="color:'+sentCol(c.sentiment)+'">'+sentLbl(c.sentiment)+'</td></tr>';}).join("");
-  var actions = (d.recommended_actions||[]).map(function(a,i){return '<li>'+a+'</li>';}).join("");
-  var sb = d.sentiment_breakdown||{};
-  var win = window.open("","_blank");
-  win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+d.brand+' Report</title><style>body{font-family:Arial,sans-serif;padding:32px;max-width:820px;margin:0 auto;font-size:12px;}h1{font-size:20px;color:#1C1C1C;border-bottom:2px solid #1C1C1C;padding-bottom:8px;margin-bottom:6px;}h2{font-size:14px;margin-top:22px;margin-bottom:8px;border-left:3px solid #1C1C1C;padding-left:8px;}table{border-collapse:collapse;width:100%;margin:8px 0;font-size:11px;}th{background:#1C1C1C;color:#fff;padding:6px 8px;text-align:left;}td{padding:5px 8px;border-bottom:1px solid #E5E5E2;}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:8px 0;}.kbox{border:1px solid #E5E5E2;padding:10px;text-align:center;border-radius:4px;}.klbl{font-size:9px;color:#767672;text-transform:uppercase;letter-spacing:.04em;}.kval{font-size:18px;font-weight:700;color:#1C1C1C;margin:3px 0;}.summary{background:#F7F7F5;padding:14px;border-radius:4px;line-height:1.7;}.footer{margin-top:24px;font-size:10px;color:#767672;border-top:1px solid #E5E5E2;padding-top:8px;}@media print{body{padding:16px;}}</style></head><body>'
-    +'<h1>'+d.brand+' — Brand Intelligence Report</h1>'
-    +'<p style="color:#767672;font-size:11px;margin-bottom:16px;">Period: <strong>'+period+'</strong> &nbsp;&middot;&nbsp; Generated: '+todayStr()+'</p>'
-    +'<div class="grid"><div class="kbox"><div class="klbl">Mentions</div><div class="kval">'+fN(d.total_mentions_estimate)+'</div></div><div class="kbox"><div class="klbl">Sentiment</div><div class="kval">'+(d.sentiment_score>0?"+":"")+d.sentiment_score+'</div></div><div class="kbox"><div class="klbl">Exposure</div><div class="kval">'+(d.exposure_index||"—")+'/100</div></div><div class="kbox"><div class="klbl">Share of Voice</div><div class="kval">'+(d.share_of_voice||0)+'%</div></div></div>'
-    +'<h2>Executive summary</h2><div class="summary">'+summary+'</div>'
-    +'<h2>Sentiment</h2><table><tr><th>Type</th><th>%</th></tr><tr><td>Positive</td><td>'+(sb.positive||0)+'%</td></tr><tr><td>Neutral</td><td>'+(sb.neutral||0)+'%</td></tr><tr><td>Negative</td><td>'+(sb.negative||0)+'%</td></tr></table>'
-    +'<h2>Channel breakdown</h2><table><tr><th>Channel</th><th>Mentions</th><th>Reach</th><th>Sentiment</th></tr>'+catRows+'</table>'
-    +'<h2>Competitor comparison</h2><table><tr><th>Brand</th><th>Share of Voice</th><th>Sentiment</th></tr>'+compRows+'</table>'
-    +'<h2>Recommended actions</h2><ol>'+actions+'</ol>'
-    +'<div class="footer">Kornit Digital Brand Intelligence &nbsp;&middot;&nbsp; '+period+'</div>'
-    +'<script>window.onload=function(){window.print();}<\/script>'
-    +'</body></html>');
-  win.document.close();
+  var yoy = d.yoy||null;
+  var sb = d.sentiment_breakdown||{positive:0,neutral:0,negative:0};
+  var negs = d.negative_mentions||[];
+  var alerts = (d.alerts||[]).filter(function(a){return a;});
+
+  // Use jsPDF
+  var jsPDF = window.jspdf ? window.jspdf.jsPDF : (window.jsPDF ? window.jsPDF : null);
+  if (!jsPDF) { alert("PDF library not loaded yet — please wait a moment and try again."); return; }
+
+  var doc = new jsPDF({orientation:"portrait", unit:"mm", format:"a4"});
+  var pageW = doc.internal.pageSize.getWidth();
+  var pageH = doc.internal.pageSize.getHeight();
+  var margin = 18;
+  var usableW = pageW - margin*2;
+  var y = margin;
+
+  function checkPage(needed) {
+    if (y + needed > pageH - margin) { doc.addPage(); y = margin; }
+  }
+  function hline() { doc.setDrawColor(220,220,215); doc.setLineWidth(0.3); doc.line(margin, y, pageW-margin, y); y += 4; }
+  function section(title) {
+    checkPage(12);
+    doc.setFontSize(12); doc.setFont(undefined,"bold"); doc.setTextColor(28,28,28);
+    doc.rect(margin, y-1, 3, 7, "F");
+    doc.text(title, margin+6, y+5);
+    y += 10; doc.setFont(undefined,"normal");
+  }
+
+  // HEADER
+  doc.setFillColor(28,28,28); doc.rect(0,0,pageW,22,"F");
+  doc.setFontSize(16); doc.setFont(undefined,"bold"); doc.setTextColor(255,255,255);
+  doc.text(d.brand+" — Brand Intelligence Report", margin, 13);
+  doc.setFontSize(9); doc.setFont(undefined,"normal"); doc.setTextColor(180,180,180);
+  doc.text("Period: "+period+"   |   Generated: "+todayStr(), margin, 19);
+  y = 28;
+
+  // SUMMARY
+  section("Executive Summary");
+  doc.setFontSize(10); doc.setTextColor(60,60,60);
+  var sumLines = doc.splitTextToSize(summary, usableW);
+  checkPage(sumLines.length*5+4);
+  doc.setFillColor(247,247,245); doc.rect(margin, y-1, usableW, sumLines.length*5+4, "F");
+  doc.text(sumLines, margin+3, y+3);
+  y += sumLines.length*5+8;
+
+  // KEY METRICS
+  section("Key Metrics");
+  var metrics = [
+    ["Total Mentions", fN(d.total_mentions_estimate), yoy?fN(yoy.total_mentions_estimate):"—"],
+    ["Sentiment Score", (d.sentiment_score>0?"+":"")+d.sentiment_score, yoy?(yoy.sentiment_score>0?"+":"")+yoy.sentiment_score:"—"],
+    ["Positive / Neutral / Negative", (sb.positive||0)+"% / "+(sb.neutral||0)+"% / "+(sb.negative||0)+"%", "—"],
+    ["Exposure Index", (d.exposure_index||"—")+"/100", yoy?(yoy.exposure_index||"—")+"/100":"—"],
+    ["Share of Voice", (d.share_of_voice||0)+"%", yoy?(yoy.share_of_voice||0)+"%":"—"]
+  ];
+  doc.autoTable({
+    startY: y, margin:{left:margin,right:margin},
+    head:[["Metric","This Period","Last Year"]],
+    body: metrics,
+    styles:{fontSize:9,cellPadding:3},
+    headStyles:{fillColor:[28,28,28],textColor:255,fontStyle:"bold"},
+    alternateRowStyles:{fillColor:[247,247,245]},
+    columnStyles:{0:{cellWidth:70},1:{cellWidth:40},2:{cellWidth:40}}
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  // CHANNEL BREAKDOWN
+  checkPage(20); section("Channel Breakdown");
+  var chRows = Object.keys(cats).map(function(k){
+    var c=cats[k];
+    return [CH_NAME[k]||k, fN(c.count), fN(c.estimated_reach), sentLbl(c.sentiment), (c.sentiment_reason||"").substring(0,60)];
+  });
+  doc.autoTable({
+    startY: y, margin:{left:margin,right:margin},
+    head:[["Channel","Mentions","Reach","Sentiment","Why"]],
+    body: chRows,
+    styles:{fontSize:8,cellPadding:2},
+    headStyles:{fillColor:[28,28,28],textColor:255},
+    alternateRowStyles:{fillColor:[247,247,245]},
+    columnStyles:{4:{cellWidth:60}}
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  // COMPETITOR COMPARISON
+  checkPage(20); section("Competitor Comparison");
+  var compList = [{name:d.brand,sov:d.share_of_voice||0,sentiment:d.overall_sentiment}];
+  (d.competitor_comparison||[]).forEach(function(c){if(c.name&&c.name.toLowerCase()!==brandLc)compList.push(c);});
+  doc.autoTable({
+    startY: y, margin:{left:margin,right:margin},
+    head:[["Brand","Share of Voice","Sentiment"]],
+    body: compList.map(function(c){return [c.name,(c.sov||0)+"%",sentLbl(c.sentiment)];}),
+    styles:{fontSize:9,cellPadding:3},
+    headStyles:{fillColor:[28,28,28],textColor:255},
+    alternateRowStyles:{fillColor:[247,247,245]}
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  // YOY
+  if (yoy) {
+    checkPage(20); section("Year-over-Year Comparison");
+    var yoyRows = [
+      ["Total mentions", fN(d.total_mentions_estimate), fN(yoy.total_mentions_estimate), (yoy.total_mentions_estimate?Math.round(((d.total_mentions_estimate-yoy.total_mentions_estimate)/yoy.total_mentions_estimate)*100):"-")+"%"],
+      ["Sentiment score", (d.sentiment_score>0?"+":"")+d.sentiment_score, (yoy.sentiment_score>0?"+":"")+yoy.sentiment_score, (yoy.sentiment_score?Math.round(d.sentiment_score-yoy.sentiment_score):"—")+" pts"],
+      ["Exposure index", (d.exposure_index||"—")+"/100", (yoy.exposure_index||"—")+"/100", (yoy.exposure_index&&d.exposure_index?Math.round(((d.exposure_index-yoy.exposure_index)/yoy.exposure_index)*100):"—")+"%"],
+      ["Share of voice", (d.share_of_voice||0)+"%", (yoy.share_of_voice||0)+"%", Math.round((d.share_of_voice||0)-(yoy.share_of_voice||0))+" pts"]
+    ];
+    doc.autoTable({
+      startY: y, margin:{left:margin,right:margin},
+      head:[["Metric","This Period","Last Year","Change"]],
+      body: yoyRows,
+      styles:{fontSize:9,cellPadding:3},
+      headStyles:{fillColor:[28,28,28],textColor:255},
+      alternateRowStyles:{fillColor:[247,247,245]}
+    });
+    y = doc.lastAutoTable.finalY + 8;
+  }
+
+  // NEGATIVE MENTIONS
+  if (negs.length || (sb.negative||0) > 0) {
+    checkPage(20); section("Negative Mentions");
+    doc.setFontSize(9); doc.setTextColor(80,30,30);
+    var negTotal = Math.round(((sb.negative||0)/100)*(d.total_mentions_estimate||0));
+    var negLine = "Total negative: ~"+negTotal+" ("+( sb.negative||0)+"% of total)";
+    if (yoy) negLine += "   |   Last year: ~"+Math.round(((yoy.sentiment_breakdown&&yoy.sentiment_breakdown.negative||10)/100)*(yoy.total_mentions_estimate||0))+" ("+(yoy.sentiment_breakdown&&yoy.sentiment_breakdown.negative||10)+"%)";
+    doc.text(negLine, margin, y); y+=6;
+    if (d.main_negative_theme) { doc.text("Main theme: "+d.main_negative_theme, margin, y); y+=5; }
+    negs.forEach(function(n){
+      checkPage(8);
+      var txt = "• "+(n.text||n.title||"")+(n.source?" ["+n.source+"]":"");
+      var lines = doc.splitTextToSize(txt, usableW);
+      doc.setTextColor(100,30,30);
+      doc.text(lines, margin, y); y += lines.length*4.5+1;
+    });
+    y += 4;
+  }
+
+  // ALERTS
+  if (alerts.length) {
+    checkPage(20); section("Alerts & Signals");
+    alerts.forEach(function(a){
+      checkPage(16);
+      var isO = typeof a==="object";
+      var ttl = isO?a.title:"Alert";
+      var txt = isO?a.text:a;
+      doc.setFontSize(9); doc.setFont(undefined,"bold"); doc.setTextColor(100,50,0);
+      doc.text(ttl, margin, y); y+=5;
+      doc.setFont(undefined,"normal"); doc.setTextColor(80,40,0);
+      var lines = doc.splitTextToSize(txt, usableW);
+      doc.text(lines, margin, y); y += lines.length*4.5+4;
+    });
+  }
+
+  // ACTIONS
+  checkPage(20); section("Recommended Actions");
+  (d.recommended_actions||[]).forEach(function(a,i){
+    checkPage(10);
+    doc.setFillColor(28,28,28); doc.circle(margin+3, y+1.5, 3, "F");
+    doc.setFontSize(8); doc.setTextColor(255,255,255); doc.text(String(i+1), margin+3, y+2.5, {align:"center"});
+    doc.setFontSize(9); doc.setTextColor(28,28,28);
+    var lines = doc.splitTextToSize(a, usableW-10);
+    doc.text(lines, margin+9, y+2);
+    y += lines.length*4.5+4;
+  });
+
+  // SOURCES
+  checkPage(20); section("Sources & References");
+  Object.keys(cats).forEach(function(k){
+    var exs = cats[k].examples||[];
+    if (!exs.length) return;
+    checkPage(8);
+    doc.setFontSize(9); doc.setFont(undefined,"bold"); doc.setTextColor(28,28,28);
+    doc.text(CH_NAME[k]||k, margin, y); y+=5; doc.setFont(undefined,"normal");
+    exs.forEach(function(ex){
+      checkPage(6);
+      var lbl = ex.title||ex.text||ex.name||"Source";
+      var sub = ex.source||ex.platform||ex.date||"";
+      var url = ex.url&&ex.url.startsWith("http")?ex.url:gsearch(d.brand,lbl);
+      doc.setFontSize(8); doc.setTextColor(28,28,28);
+      var line = "• "+lbl.substring(0,80)+(sub?" ["+sub+"]":"");
+      doc.text(line, margin+3, y);
+      doc.setTextColor(28,28,200);
+      doc.textWithLink("", margin+3, y, {url:url});
+      y+=4.5;
+    });
+    y+=2;
+  });
+
+  // FOOTER on each page
+  var totalPages = doc.internal.getNumberOfPages();
+  for (var i=1; i<=totalPages; i++) {
+    doc.setPage(i);
+    doc.setFontSize(8); doc.setTextColor(180,180,175);
+    doc.text("Kornit Digital Brand Intelligence  ·  "+period+"  ·  Page "+i+"/"+totalPages, margin, pageH-8);
+  }
+
+  doc.save((d.brand||"brand").replace(/\s+/g,"-")+"-brand-report.pdf");
 }
+
 
 // ── Init ───────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", function() {
