@@ -1109,7 +1109,7 @@ def scan():
 
         key = os.environ.get("ANTHROPIC_API_KEY", "")
         if not key:
-            return jsonify({"success": False, "error": "ANTHROPIC_API_KEY missing — check Render environment variables"})
+            return jsonify({"success": False, "error": "ANTHROPIC_API_KEY missing"})
 
         period    = f"{start} to {end}" if start and end else "last 30 days"
         comp_list = [c.strip() for c in comps_str.split(",") if c.strip()]
@@ -1132,6 +1132,7 @@ def scan():
     "period": "{yoy_start} to {yoy_end}",
     "total_mentions_estimate": 400,
     "sentiment_score": 45,
+    "sentiment_breakdown": {{"positive": 58, "neutral": 32, "negative": 10}},
     "exposure_index": 58,
     "share_of_voice": 48,
     "monthly_volume": [
@@ -1146,40 +1147,55 @@ def scan():
     }}
   }}"""
 
-        prompt = f"""You are a brand intelligence analyst. Analyze "{brand}" STRICTLY for {period} only.
-Do NOT reference data outside {start} to {end}.
-Competitors: {", ".join(comp_list)}.
-NEVER include "{brand}" in competitor_comparison.
-{f'Also estimate metrics for last year ({yoy_start} to {yoy_end}).' if yoy_start else ''}
+        SYSTEM = """You are a brand intelligence analyst with web search access.
+IMPORTANT RULES:
+1. Use web_search to find REAL articles, news, events, YouTube videos about the brand in the given period.
+2. For every example you include, provide the REAL URL you found via search — not a made-up URL.
+3. Search at least 5 times: news articles, social/LinkedIn, events, YouTube, competitor news.
+4. Only include data from the specified date range.
+5. Never include the analyzed brand in competitor_comparison.
+6. Return ONLY valid JSON — no markdown, no code fences. Start with { end with }."""
 
-Return ONLY valid JSON — no markdown, no code fences, start directly with {{.
+        prompt = f"""Search the web and analyze "{brand}" for the period {period}.
+Competitors to compare: {", ".join(comp_list)}.
+{f"Also estimate metrics for same period last year ({yoy_start} to {yoy_end})." if yoy_start else ""}
 
+For EACH example in categories, find the REAL URL via web search and include it.
+Search queries to run:
+- "{brand}" news articles {start[:7] if start else ""}
+- "{brand}" press release announcement {start[:4] if start else ""}  
+- "{brand}" LinkedIn social media {start[:7] if start else ""}
+- "{brand}" YouTube video {start[:7] if start else ""}
+- "{brand}" events conference {start[:4] if start else ""}
+- {comp_list[0] if comp_list else ""} vs {brand} {start[:4] if start else ""}
+
+Return ONLY this JSON (start with {{):
 {{
   "brand": "{brand}",
   "period": "{period}",
   "start_date": "{start}",
   "end_date": "{end}",
-  "summary": "3-4 sentences in English about brand presence DURING {period} only.",
+  "summary": "3-4 sentences about brand presence DURING {period} based on what you found.",
   "overall_sentiment": "Positive",
   "sentiment_score": 65,
   "sentiment_breakdown": {{"positive": 68, "neutral": 24, "negative": 8}},
   "total_mentions_estimate": 780,
   "exposure_index": 72,
   "share_of_voice": 57,
-  "main_negative_theme": "Main complaint or criticism topic in {period}",
+  "main_negative_theme": "Main criticism found in {period}",
   "competitor_negative_avg": 12,
   "negative_mentions": [
-    {{"text": "Specific negative mention from {period}", "source": "Source", "platform": "Platform", "date": "{start[:7]}"}},
-    {{"text": "Second negative mention from {period}", "source": "Source", "platform": "Platform", "date": "{start[:7]}"}}
+    {{"text": "Specific negative mention found via search", "source": "Source name", "platform": "Platform", "date": "{start[:7] if start else ''}"}},
+    {{"text": "Second negative found", "source": "Source", "platform": "Platform", "date": "{start[:7] if start else ''}"}}
   ],
   "categories": {{
-    "articles":  {{"count": 25, "sentiment": "Positive", "sentiment_reason": "Why articles are positive in {period}.", "estimated_reach": 500000, "examples": [{{"title": "Article from {period}", "source": "Publisher", "url": "", "date": "{start[:7]}"}}]}},
-    "social":    {{"count": 300,"sentiment": "Neutral",  "sentiment_reason": "Why social is neutral in {period}.",  "estimated_reach": 200000, "platforms": ["LinkedIn","Facebook"], "examples": [{{"text": "Post topic in {period}", "platform": "LinkedIn"}}]}},
-    "ads":       {{"count": 15, "sentiment": "Positive", "sentiment_reason": "Ad campaigns in {period}.",           "estimated_reach": 400000, "platforms": ["Google","Meta"], "notes": "Campaign focus", "examples": [{{"text": "Campaign", "platform": "Google Ads"}}]}},
-    "events":    {{"count": 3,  "sentiment": "Positive", "sentiment_reason": "Events in {period}.",                 "estimated_reach": 8000,   "examples": [{{"name": "Event name", "date": "{start[:7]}", "description": "Description", "url": ""}}]}},
-    "forums":    {{"count": 50, "sentiment": "Neutral",  "sentiment_reason": "Forum topics in {period}.",           "estimated_reach": 30000,  "platforms": ["Reddit"], "examples": [{{"text": "Forum topic from {period}", "platform": "Reddit", "url": ""}}]}},
-    "youtube":   {{"count": 20, "sentiment": "Positive", "sentiment_reason": "YouTube content in {period}.",        "estimated_reach": 150000, "examples": [{{"title": "Video from {period}", "source": "Channel", "url": "", "date": "{start[:7]}"}}]}},
-    "podcasts":  {{"count": 8,  "sentiment": "Positive", "sentiment_reason": "Podcast mentions in {period}.",       "estimated_reach": 40000,  "platforms": ["Spotify","Apple Podcasts"], "examples": [{{"title": "Episode from {period}", "source": "Show", "url": "", "date": "{start[:7]}"}}]}}
+    "articles":  {{"count": 25, "sentiment": "Positive", "sentiment_reason": "Why based on articles found.", "estimated_reach": 500000, "examples": [{{"title": "REAL article title found", "source": "Publisher", "url": "REAL_URL_FROM_SEARCH", "date": "{start[:7] if start else ''}"}}]}},
+    "social":    {{"count": 300,"sentiment": "Neutral",  "sentiment_reason": "Why based on social found.", "estimated_reach": 200000, "platforms": ["LinkedIn","Facebook"], "examples": [{{"text": "Real post or topic found", "platform": "LinkedIn", "url": "REAL_URL_IF_FOUND"}}]}},
+    "ads":       {{"count": 15, "sentiment": "Positive", "sentiment_reason": "Campaigns found.", "estimated_reach": 400000, "platforms": ["Google","Meta"], "notes": "What was advertised", "examples": [{{"text": "Ad campaign description", "platform": "Google Ads", "url": ""}}]}},
+    "events":    {{"count": 3,  "sentiment": "Positive", "sentiment_reason": "Events found.", "estimated_reach": 8000, "examples": [{{"name": "REAL event name found", "date": "{start[:7] if start else ''}", "description": "Description", "url": "REAL_URL_FROM_SEARCH"}}]}},
+    "forums":    {{"count": 50, "sentiment": "Neutral",  "sentiment_reason": "Forum topics found.", "estimated_reach": 30000, "platforms": ["Reddit"], "examples": [{{"text": "Forum discussion found", "platform": "Reddit", "url": "REAL_URL_IF_FOUND"}}]}},
+    "youtube":   {{"count": 20, "sentiment": "Positive", "sentiment_reason": "YouTube content found.", "estimated_reach": 150000, "examples": [{{"title": "REAL YouTube video title found", "source": "Channel name", "url": "REAL_YOUTUBE_URL", "date": "{start[:7] if start else ''}"}}]}},
+    "podcasts":  {{"count": 8,  "sentiment": "Positive", "sentiment_reason": "Podcasts found.", "estimated_reach": 40000, "platforms": ["Spotify","Apple Podcasts"], "examples": [{{"title": "Real podcast episode found", "source": "Show name", "url": "REAL_URL_IF_FOUND", "date": "{start[:7] if start else ''}"}}]}}
   }},
   "monthly_volume": [
     {{"month": "Jan", "articles": 5,  "social": 50,  "youtube": 3,  "forums": 10}},
@@ -1192,49 +1208,68 @@ Return ONLY valid JSON — no markdown, no code fences, start directly with {{.
     {{"name": "{comp_list[1] if len(comp_list)>1 else 'Competitor 2'}", "sov": 14, "sentiment": "Neutral", "color": "#B0B0AD"}},
     {{"name": "{comp_list[2] if len(comp_list)>2 else 'Competitor 3'}", "sov": 8,  "sentiment": "Neutral", "color": "#D0D0CC"}}
   ],
-  "top_themes": ["Theme from {period}", "Second theme", "Third theme", "Fourth theme"],
+  "top_themes": ["Theme found in searches", "Second theme", "Third theme", "Fourth theme"],
   "alerts": [
-    {{"title": "Alert: specific event in {period}", "text": "2-3 sentences explaining what happened, why it matters, specific to {period}."}}
+    {{"title": "Alert title based on search findings", "text": "2-3 sentences explaining what you found that warrants attention."}}
   ],
   "recommended_actions": [
-    "Concrete action 1 based on {period} findings",
-    "Concrete action 2 referencing a channel or trend",
-    "Forward-looking action 3"
+    "Action based on findings from web search in {period}",
+    "Action based on specific channel gap found",
+    "Forward-looking action"
   ]{yoy_block}
 }}"""
 
-        response = req.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-            json={
-                "model": "claude-haiku-4-5-20251001",
-                "max_tokens": 4000,
-                "system": "You are a brand intelligence analyst. Return ONLY valid JSON. No markdown, no code fences. Start with { end with }. Never include data outside the requested date range. Never include the analyzed brand in competitor_comparison.",
-                "messages": [{"role": "user", "content": prompt}],
-            },
-            timeout=120,
-        )
+        messages = [{"role": "user", "content": prompt}]
 
-        if response.status_code != 200:
-            return jsonify({"success": False, "error": f"API error {response.status_code}: {response.text[:200]}"})
+        # Loop with web_search tool
+        for _ in range(15):
+            resp = req.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                json={
+                    "model": "claude-sonnet-4-6",
+                    "max_tokens": 5000,
+                    "system": SYSTEM,
+                    "tools": [{"type": "web_search_20250305", "name": "web_search"}],
+                    "messages": messages,
+                },
+                timeout=180,
+            )
 
-        text = response.json()["content"][0]["text"].strip()
-        text = re.sub(r"^```[a-z]*\n?", "", text)
-        text = re.sub(r"\n?```$", "", text)
+            if resp.status_code != 200:
+                return jsonify({"success": False, "error": f"API error {resp.status_code}: {resp.text[:200]}"})
 
-        m = re.search(r"\{[\s\S]*\}", text)
-        if not m:
-            return jsonify({"success": False, "error": "No JSON in response: " + text[:300]})
+            r = resp.json()
+            content_blocks = r.get("content", [])
+            messages.append({"role": "assistant", "content": content_blocks})
 
-        data = json.loads(m.group())
+            stop_reason = r.get("stop_reason", "")
 
-        # Server-side: never include brand in competitor_comparison
-        data["competitor_comparison"] = [
-            c for c in data.get("competitor_comparison", [])
-            if c.get("name", "").lower() != brand.lower()
-        ]
+            if stop_reason == "end_turn":
+                # Extract JSON from text blocks
+                text = "".join(b.get("text","") for b in content_blocks if b.get("type")=="text")
+                text = re.sub(r"^```[a-z]*\n?", "", text.strip())
+                text = re.sub(r"\n?```$", "", text)
+                m = re.search(r"\{[\s\S]*\}", text)
+                if not m:
+                    return jsonify({"success": False, "error": "No JSON in response: " + text[:300]})
+                data = json.loads(m.group())
+                data["competitor_comparison"] = [
+                    c for c in data.get("competitor_comparison", [])
+                    if c.get("name","").lower() != brand.lower()
+                ]
+                return jsonify({"success": True, "data": data})
 
-        return jsonify({"success": True, "data": data})
+            if stop_reason == "tool_use":
+                tool_results = [
+                    {"type": "tool_result", "tool_use_id": b["id"], "content": "Search completed."}
+                    for b in content_blocks
+                    if b.get("type") == "tool_use"
+                ]
+                if tool_results:
+                    messages.append({"role": "user", "content": tool_results})
+
+        return jsonify({"success": False, "error": "Scan timed out after too many steps"})
 
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
