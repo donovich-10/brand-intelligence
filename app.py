@@ -1302,14 +1302,22 @@ Return ONLY valid JSON, no markdown, start with {{:
             return jsonify({"success": False, "error": f"API error {resp.status_code}: {resp.text[:200]}"})
 
         text = resp.json()["content"][0]["text"].strip()
-        text = re.sub(r"^```[a-z]*\n?", "", text)
-        text = re.sub(r"\n?```$", "", text)
+        text = re.sub(r"^```[a-z]*", "", text)
+        text = re.sub(r"```$", "", text.strip())
 
-        m = re.search(r"\{[\s\S]*\}", text)
+        m = re.search(r"[{][\s\S]*[}]", text)
         if not m:
             return jsonify({"success": False, "error": "No JSON: " + text[:300]})
 
-        data = json.loads(m.group())
+        raw = m.group()
+        # Fix smart quotes and common LLM JSON issues
+        raw = raw.replace(chr(8217), "'").replace(chr(8216), "'")
+        raw = raw.replace(chr(8221), '"').replace(chr(8220), '"')
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as je:
+            # Return helpful error with retry suggestion
+            return jsonify({"success": False, "error": f"JSON format error — please try again. ({str(je)[:80]})"})
 
         # Remove brand from competitors
         data["competitor_comparison"] = [
