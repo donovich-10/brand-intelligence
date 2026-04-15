@@ -343,11 +343,18 @@ const CH_METHOD={
   youtube:"Videos on YouTube that mention or review the brand. Estimated from channel activity and keyword searches.",
   podcasts:"Episode mentions on Spotify and Apple Podcasts. Based on industry podcast monitoring signals."
 };
-let competitors=["ROQ","MrPrint","Brother DTG"];
+const DEFAULT_COMPETITORS=["ROQ","MrPrint","Brother DTG"];
+let competitors=[...DEFAULT_COMPETITORS];
 
-function renderTags(){document.getElementById("comp-tags").innerHTML=competitors.map((c,i)=>`<span class="comp-tag">${c}<span onclick="removeComp(${i})">×</span></span>`).join("");}
+function renderTags(){
+  document.getElementById("comp-tags").innerHTML=competitors.map((c,i)=>{
+    const isDef=DEFAULT_COMPETITORS.includes(c);
+    return`<span class="comp-tag" style="background:${isDef?'var(--orange)':'var(--dark)'};">${c}<span onclick="removeComp(${i})">×</span></span>`;
+  }).join("")+`<span onclick="resetComps()" style="font-size:11px;color:var(--muted);cursor:pointer;padding:3px 8px;text-decoration:underline;">reset defaults</span>`;
+}
 function addComp(){const v=document.getElementById("comp-input").value.trim();if(v&&!competitors.includes(v)){competitors.push(v);renderTags();document.getElementById("comp-input").value="";}}
 function removeComp(i){competitors.splice(i,1);renderTags();}
+function resetComps(){competitors=[...DEFAULT_COMPETITORS];renderTags();}
 document.getElementById("comp-input").addEventListener("keydown",e=>{if(e.key==="Enter")addComp();});
 renderTags();
 
